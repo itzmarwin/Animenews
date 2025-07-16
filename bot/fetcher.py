@@ -61,57 +61,140 @@ def extract_image(entry) -> str:
     """Extract image from entry using multiple methods with priority"""
     # Method 1: Direct media tags
     if "media_thumbnail" in entry and entry.media_thumbnail:
+        print("ℹ️ Found image via media_thumbnail")
         return entry.media_thumbnail[0]['url']
     
     if "media_content" in entry and entry.media_content:
         for media in entry.media_content:
             if media.get('type', '').startswith('image'):
+                print("ℹ️ Found image via media_content")
                 return media['url']
     
     # Method 2: Enclosure links
     if "links" in entry:
         for link in entry.links:
             if link.get('type', '').startswith('image'):
+                print("ℹ️ Found image via links")
                 return link.href
     
-    # Method 3: Content parsing (for feeds like Anime Corner)
+    # Method 3: WordPress featured images
+    if "wp_featured_image" in entry:
+        print("ℹ️ Found WordPress featured image")
+        return entry.wp_featured_image
+    
+    # Method 4: Content parsing (for feeds like Anime Corner)
     if "content" in entry:
         for content in entry.content:
             soup = BeautifulSoup(content.value, 'html.parser')
             img = soup.find('img')
             if img and img.get('src'):
-                return img['src']
+                src = img['src']
+                # Fix relative URLs
+                if src.startswith('//'):
+                    return f"https:{src}"
+                elif src.startswith('/'):
+                    base_url = '/'.join(entry.link.split('/')[:3])
+                    return f"{base_url}{src}"
+                print("ℹ️ Found image via content parsing")
+                return src
     
-    # Method 4: Summary parsing
+    # Method 5: Summary parsing
     if "summary" in entry:
         soup = BeautifulSoup(entry.summary, 'html.parser')
         img = soup.find('img')
         if img and img.get('src'):
-            return img['src']
+            src = img['src']
+            # Fix relative URLs
+            if src.startswith('//'):
+                return f"https:{src}"
+            elif src.startswith('/'):
+                base_url = '/'.join(entry.link.split('/')[:3])
+                return f"{base_url}{src}"
+            print("ℹ️ Found image via summary parsing")
+            return src
     
-    # Method 5: Open Graph scraping (fallback)
+    # Method 6: Open Graph scraping with enhanced handling
     if "link" in entry:
         try:
             print(f"🔍 Scraping OG image from: {entry.link}")
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://www.google.com/',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
             }
             response = requests.get(entry.link, headers=headers, timeout=15)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Try Open Graph image first
                 og_image = soup.find('meta', property='og:image')
                 if og_image and og_image.get('content'):
-                    return og_image['content']
+                    src = og_image['content']
+                    print("ℹ️ Found image via OG tag")
+                    return src
                 
-                # Fallback to first content image
-                content_img = soup.find('img')
-                if content_img and content_img.get('src'):
-                    return content_img['src']
+                # Try Twitter image
+                twitter_image = soup.find('meta', property='twitter:image')
+                if twitter_image and twitter_image.get('content'):
+                    src = twitter_image['content']
+                    print("ℹ️ Found image via Twitter card")
+                    return src
+                
+                # Try schema.org image
+                schema_image = soup.find('meta', itemprop='image')
+                if schema_image and schema_image.get('content'):
+                    src = schema_image['content']
+                    print("ℹ️ Found image via schema.org")
+                    return src
+                
+                # Fallback to first large content image
+                for img in soup.find_all('img'):
+                    src = img.get('src', '')
+                    if src:
+                        # Fix relative URLs
+                        if src.startswith('//'):
+                            src = f"https:{src}"
+                        elif src.startswith('/'):
+                            base_url = '/'.join(entry.link.split('/')[:3])
+                            src = f"{base_url}{src}"
+                        
+                        # Check for large images
+                        if any(x in src.lower() for x in ['featured', 'cover', 'main', 'hero', 'header', 'post']):
+                            print("ℹ️ Found image via content image (featured)")
+                            return src
+                        
+                        # Check for image size hints in attributes
+                        width = img.get('width', '0')
+                        height = img.get('height', '0')
+                        try:
+                            if int(width) > 300 and int(height) > 200:
+                                print("ℹ️ Found image via content image (size)")
+                                return src
+                        except:
+                            pass
+                
+                # Final fallback: First image in content
+                img = soup.find('img')
+                if img and img.get('src'):
+                    src = img['src']
+                    # Fix relative URLs
+                    if src.startswith('//'):
+                        return f"https:{src}"
+                    elif src.startswith('/'):
+                        base_url = '/'.join(entry.link.split('/')[:3])
+                        return f"{base_url}{src}"
+                    print("ℹ️ Found image via first content image")
+                    return src
         except Exception as e:
             print(f"⚠️ OG image scraping failed: {e}")
     
+    print("ℹ️ No image found for entry")
     return None
-
+    
 def translate_if_needed(text: str) -> str:
     try:
         # Only translate if not English
