@@ -9,7 +9,7 @@ def clean_title_for_search(title: str) -> str:
     cleaned = re.sub(r'[^\w\s]', '', title)
     cleaned = re.sub(r'\b\d{4}\b', '', cleaned)
     # Remove common prefixes
-    cleaned = re.sub(r'^(new|the|anime|manga)\s', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^(new|the|anime|manga|game|trailer|teaser)\s', '', cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 def get_anime_info(title):
@@ -50,7 +50,7 @@ def get_anime_info(title):
             ANILIST_API_URL,
             json={"query": query, "variables": variables},
             headers={"Content-Type": "application/json"},
-            timeout=10  # Add timeout
+            timeout=10
         )
         
         # Handle non-200 responses
@@ -60,7 +60,7 @@ def get_anime_info(title):
 
         data = response.json()
         
-        # Handle GraphQL errors
+        # Handle GraphQL errors or missing data
         if "errors" in data:
             print(f"❌ AniList query error: {data['errors'][0]['message']}")
             return None
