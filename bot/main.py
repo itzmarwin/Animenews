@@ -7,39 +7,31 @@ from bot.config import BOT_TOKEN, CHANNEL_ID
 from bot.fetcher import fetch_latest_post
 from bot.anilist import get_anime_info
 from bot.utils import download_trailer_youtube
+from bs4 import BeautifulSoup  # For better HTML cleaning
 
 bot = Bot(token=BOT_TOKEN)
 
-# ✅ Keywords to detect valid anime-related news
-KEYWORDS = [
-    "anime film", "anime movie", "anime film", "film", "movie", "movie adaptation", "film debut", "film release", "film opens",
-    "tv anime", "new anime", "anime announced", "anime adaptation", "anime confirmed", "anime series",
-    "anime premiere", "new season", "season 2", "season 3", "final season", "anime finale",
-    "cast revealed", "full cast", "staff revealed", "theme song", "visual revealed", "key visual",
-    "official poster", "official site", "first look", "trailer", "teaser", "pv", "mv",
-    "release date", "air date", "debuts", "starts airing", "begins airing", "premiere date",
-    "delayed", "delay", "break", "hiatus", "no episode this week", "episode postponed",
-    "special episode", "prologue film", "preview screening", "advance screening",
-    "final arc", "arc begins", "arc finale", "last episode", "ends with", "concludes with",
-    "english dub", "netflix to stream", "crunchyroll to stream", "streaming on",
-    "new visual", "promo video", "key art", "new cast member"
-]
-
-def is_relevant_news(text: str) -> bool:
-    """Check if news title + summary contains anime-related keywords."""
-    text = text.lower()
-    return any(keyword in text for keyword in KEYWORDS)
-
 def clean_summary(raw_html):
-    """Allow only specific tags in summary."""
-    allowed_tags = ["b", "strong", "i", "u", "a"]
-    cleaned = re.sub(r'</?(?!({})).*?>'.format("|".join(allowed_tags)), '', raw_html)
-    return cleaned
+    """Remove all HTML tags except basic formatting and links."""
+    # Use BeautifulSoup for better HTML parsing
+    soup = BeautifulSoup(raw_html, 'html.parser')
+    
+    # Remove all links but keep their text
+    for a in soup.find_all('a'):
+        a.replace_with(a.get_text())
+    
+    # Remove any remaining HTML tags except formatting
+    allowed_tags = ["b", "strong", "i", "u", "em"]
+    for tag in soup.find_all(True):
+        if tag.name not in allowed_tags:
+            tag.unwrap()
+    
+    return str(soup)
 
 def is_trailer_related(text: str) -> bool:
-    """Detect trailer or teaser announcements."""
+    """Detect trailer or teaser announcements with more keywords."""
     text = text.lower()
-    keywords = ["trailer", "teaser", "key visual", "pv"]
+    keywords = ["trailer", "teaser", "key visual", "pv", "promo video", "opening", "ending", "mv"]
     return any(word in text for word in keywords)
 
 async def post_news():
@@ -49,16 +41,25 @@ async def post_news():
         print("No new news.")
         return
 
-    combined = (news['title'] + " " + news['summary']).lower()
-    if not is_relevant_news(combined):
-        print("⛔ Skipped: Not anime-relevant")
-        return
+    # Combine title and content for better relevance checking
+    combined = f"{news['title']} {news.get('raw_content', news['summary'])}".lower()
 
-    # Prepare default message
+    # Prepare message content
     title = html.escape(news['title'])
-    summary = clean_summary(news['summary'])
+    
+    # Use raw content if available, otherwise summary
+    content = news.get('raw_content', news['summary'])
+    summary = clean_summary(content)
+    
+    # Remove any remaining URLs
+    summary = re.sub(r'https?://\S+', '', summary)
+    
+    # Truncate to 300 characters
+    if len(summary) > 300:
+        summary = summary[:300] + "..."
+
     message = f"📰 <b>{title}</b>\n\n"
-    message += f"{html.unescape(summary[:300])}...\n\n"
+    message += f"{html.unescape(summary)}\n\n"
     message += f"<i>Published: {news['published']}</i>"
 
     # Detect trailer-related posts
@@ -74,9 +75,9 @@ async def post_news():
                 # Caption for trailer
                 caption = f"🎬 <b>{anime_info['title']}</b>\n\n"
                 caption += "Official Trailer Released!\n"
-                if anime_info['release_date']:
+                if anime_info.get('release_date'):
                     caption += f"📅 Release: {anime_info['release_date']}\n"
-                if anime_info['studio']:
+                if anime_info.get('studio'):
                     caption += f"🏢 Studio: {anime_info['studio']}\n"
 
                 try:
@@ -88,27 +89,37 @@ async def post_news():
                         supports_streaming=True
                     )
                     print("✅ Trailer posted as video!")
+                    
+                    # Now post the news details separately
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=message,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
                 except Exception as e:
-                    print(f"❌ Telegram send video error: {e}")
+                    print(f"❌ Telegram send error: {e}")
                 finally:
-                    os.remove(filename)
+                    if os.path.exists(filename):
+                        os.remove(filename)
                 return
 
-    # If not trailer or video failed, fallback to photo or message
+    # If not trailer or video failed, send news with image
     try:
         if news.get("image"):
             await bot.send_photo(
                 chat_id=CHANNEL_ID,
                 photo=news["image"],
                 caption=message,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                disable_notification=False
             )
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=message,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True  # No link previews
             )
         print("✅ News posted.")
     except Exception as e:
@@ -121,7 +132,8 @@ async def main_loop():
             await post_news()
         except Exception as e:
             print(f"⚠️ Error in loop: {e}")
-        await asyncio.sleep(20)
+        # Check every 10 minutes (600 seconds)
+        await asyncio.sleep(600)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
