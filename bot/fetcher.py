@@ -1,3 +1,4 @@
+import os
 import feedparser
 from .config import RSS_FEED_URL, LAST_GUID_FILE
 
