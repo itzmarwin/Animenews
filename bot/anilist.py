@@ -1,6 +1,16 @@
 import requests
+import re
 
 ANILIST_API_URL = "https://graphql.anilist.co"
+
+def clean_title_for_search(title: str) -> str:
+    """Clean title for better AniList search matching"""
+    # Remove special characters and year information
+    cleaned = re.sub(r'[^\w\s]', '', title)
+    cleaned = re.sub(r'\b\d{4}\b', '', cleaned)
+    # Remove common prefixes
+    cleaned = re.sub(r'^(new|the|anime|manga)\s', '', cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 def get_anime_info(title):
     query = '''
@@ -31,22 +41,40 @@ def get_anime_info(title):
     }
     '''
 
-    variables = {"search": title}
+    # Clean the title for better search results
+    search_title = clean_title_for_search(title)
+    variables = {"search": search_title}
 
     try:
         response = requests.post(
             ANILIST_API_URL,
             json={"query": query, "variables": variables},
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
+            timeout=10  # Add timeout
         )
+        
+        # Handle non-200 responses
         if response.status_code != 200:
             print(f"❌ AniList API error: {response.status_code}")
             return None
 
-        data = response.json()["data"]["Media"]
+        data = response.json()
+        
+        # Handle GraphQL errors
+        if "errors" in data:
+            print(f"❌ AniList query error: {data['errors'][0]['message']}")
+            return None
+            
+        if "data" not in data or data["data"]["Media"] is None:
+            print(f"ℹ️ No anime found for: {search_title}")
+            return None
 
-        english_title = data["title"]["english"] or data["title"]["romaji"]
-        image = data["coverImage"]["large"]
+        data = data["data"]["Media"]
+
+        # Use the most available title
+        english_title = data["title"]["english"] or data["title"]["romaji"] or title
+
+        image = data["coverImage"]["large"] if data["coverImage"] else None
 
         # Trailer URL construction
         trailer_link = ""
@@ -65,7 +93,7 @@ def get_anime_info(title):
         date = data["startDate"]
         release = "Unknown"
         if date["year"]:
-            release = f"{date['year']}-{date['month']:02}-{date['day']:02}"
+            release = f"{date['year']}-{date.get('month', '??'):02}-{date.get('day', '??'):02}"
 
         return {
             "title": english_title,
