@@ -4,7 +4,7 @@ from .config import RSS_FEED_URL, LAST_GUID_FILE
 
 # Include only relevant anime keywords
 RELEVANT_KEYWORDS = [
-    "anime adaptation", "anime announced", "anime project", "tv anime", "new anime",
+    "anime adaptation", "movie", "anime announced", "anime project", "tv anime", "new anime",
     "trailer", "teaser", "key visual", "promo video", "pv", "mv",
     "delayed", "delay", "anime film", "movie", "postponed", "on break", "hiatus",
     "release date", "airing", "premiere", "starts airing", "final season", "season 2", "season 3"
