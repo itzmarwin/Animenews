@@ -42,6 +42,12 @@ def save_last_guid(feed_url: str, guid: str):
         f.write(guid)
 
 def is_relevant(entry) -> bool:
+    # ALWAYS include Crunchyroll news
+    if "crunchyrollsvc.com" in entry.get("link", "") or "crunchyroll.com" in entry.get("link", ""):
+        print("✅ Crunchyroll news - always relevant")
+        return True
+    
+    # For other sources, apply keyword filtering
     title = entry.get("title", "").lower()
     summary = entry.get("summary", "").lower()
     content = f"{title} {summary}"
@@ -59,8 +65,47 @@ def is_relevant(entry) -> bool:
     print("⛔ Not relevant: No matching keywords")
     return False
 
+def extract_crunchyroll_image(entry) -> str:
+    """Special image extraction for Crunchyroll API format"""
+    try:
+        # Method 1: Try media_content first
+        if "media_content" in entry and entry.media_content:
+            for media in entry.media_content:
+                if media.get('type', '').startswith('image'):
+                    return media['url']
+        
+        # Method 2: Check for images collection
+        if "images" in entry and entry.images:
+            # Find the highest quality image
+            best_image = None
+            max_width = 0
+            
+            for image in entry.images:
+                try:
+                    # Extract width from URL parameters
+                    width_match = re.search(r'width=(\d+)', image.href)
+                    if width_match:
+                        width = int(width_match.group(1))
+                        if width > max_width:
+                            max_width = width
+                            best_image = image.href
+                except:
+                    pass
+            
+            if best_image:
+                return best_image
+            return entry.images[0].href
+    
+    except Exception as e:
+        print(f"⚠️ Crunchyroll image extraction failed: {e}")
+    return None
+
 def extract_image(entry) -> str:
     """Extract image from entry using multiple methods with priority"""
+    # Special handling for Crunchyroll API
+    if "crunchyrollsvc.com" in entry.get("link", ""):
+        return extract_crunchyroll_image(entry)
+    
     # Method 1: Direct media tags
     if "media_thumbnail" in entry and entry.media_thumbnail:
         print("ℹ️ Found image via media_thumbnail")
@@ -178,7 +223,12 @@ def fetch_latest_post():
         print(f"🌐 Checking feed: {feed_url}")
         try:
             # Add cache busting to prevent 304 responses
-            modified_url = f"{feed_url}?t={int(time.time())}"
+            if "crunchyrollsvc.com" in feed_url:
+                # Crunchyroll API needs special handling
+                modified_url = f"{feed_url}?t={int(time.time())}"
+            else:
+                modified_url = f"{feed_url}?t={int(time.time())}"
+                
             feed = feedparser.parse(modified_url)
             
             if not feed.entries:
