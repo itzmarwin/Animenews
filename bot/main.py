@@ -12,7 +12,7 @@ bot = Bot(token=BOT_TOKEN)
 
 # ✅ Keywords to detect valid anime-related news
 KEYWORDS = [
-    "anime film", "anime movie", "movie adaptation", "film debut", "film release", "film opens",
+    "anime film", "anime movie", "anime film", "film", "movie adaptation", "film debut", "film release", "film opens",
     "tv anime", "new anime", "anime announced", "anime adaptation", "anime confirmed", "anime series",
     "anime premiere", "new season", "season 2", "season 3", "final season", "anime finale",
     "cast revealed", "full cast", "staff revealed", "theme song", "visual revealed", "key visual",
