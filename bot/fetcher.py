@@ -1,38 +1,42 @@
 import os
 import feedparser
-from .config import RSS_FEED_URL, LAST_GUID_FILE
+from googletrans import Translator
+from .config import RSS_FEEDS, LAST_GUID_DIR
 
-# Include only relevant anime keywords
+# Only allow anime-related content
 RELEVANT_KEYWORDS = [
-    "anime adaptation", "movie", "anime announced", "anime project", "tv anime", "new anime",
+    "anime adaptation", "anime announced", "anime project", "tv anime", "new anime",
     "trailer", "teaser", "key visual", "promo video", "pv", "mv",
     "delayed", "delay", "anime film", "movie", "postponed", "on break", "hiatus",
     "release date", "airing", "premiere", "starts airing", "final season", "season 2", "season 3"
 ]
 
-# Words to skip if they appear in title/summary
+# Exclude live-action / non-anime
 EXCLUDE_KEYWORDS = [
     "zelda", "live-action", "netflix film", "game franchise", "hollywood", "actor", "casts"
 ]
 
-def get_last_guid():
-    if not os.path.exists(LAST_GUID_FILE):
+translator = Translator()
+
+def guid_path(feed_url):
+    filename = feed_url.replace("https://", "").replace("/", "_") + ".txt"
+    return os.path.join(LAST_GUID_DIR, filename)
+
+def get_last_guid(feed_url):
+    path = guid_path(feed_url)
+    if not os.path.exists(path):
         return None
-    with open(LAST_GUID_FILE, "r") as f:
+    with open(path, "r") as f:
         return f.read().strip()
 
-def save_last_guid(guid):
-    with open(LAST_GUID_FILE, "w") as f:
+def save_last_guid(feed_url, guid):
+    with open(guid_path(feed_url), "w") as f:
         f.write(guid)
 
 def is_relevant(entry):
-    """Check if the RSS entry is anime-news relevant."""
     title = entry.get("title", "").lower()
     summary = entry.get("summary", "").lower()
-    content = title + " " + summary
-
-    # Debug: print title being checked
-    print(f"🔍 Checking: {title}")
+    content = f"{title} {summary}"
 
     for word in EXCLUDE_KEYWORDS:
         if word in content:
@@ -46,35 +50,51 @@ def is_relevant(entry):
     return False
 
 def extract_image(entry):
-    """Try to extract thumbnail or media image if available."""
     if "media_thumbnail" in entry:
         return entry.media_thumbnail[0]['url']
     elif "media_content" in entry:
         return entry.media_content[0]['url']
     return None
 
+def translate_if_needed(text):
+    """Translate to English if not already."""
+    try:
+        lang = translator.detect(text).lang
+        if lang != "en":
+            translated = translator.translate(text, src=lang, dest="en")
+            return translated.text
+    except Exception as e:
+        print(f"⚠️ Translation failed: {e}")
+    return text
+
 def fetch_latest_post():
-    feed = feedparser.parse(RSS_FEED_URL)
-    if not feed.entries:
-        print("❌ No entries in RSS feed.")
-        return None
+    for feed_url in RSS_FEEDS:
+        print(f"🌐 Checking feed: {feed_url}")
+        feed = feedparser.parse(feed_url)
+        if not feed.entries:
+            continue
 
-    latest_entry = feed.entries[0]
-    last_guid = get_last_guid()
+        latest = feed.entries[0]
+        last_guid = get_last_guid(feed_url)
 
-    if latest_entry.id == last_guid:
-        print("🔁 No new post (GUID match).")
-        return None
+        if latest.id == last_guid:
+            print("🔁 No new post (GUID match).")
+            continue
 
-    if is_relevant(latest_entry):
-        save_last_guid(latest_entry.id)
-        return {
-            "title": latest_entry.title,
-            "link": latest_entry.link,
-            "summary": latest_entry.summary,
-            "published": latest_entry.published,
-            "image": extract_image(latest_entry)
-        }
-    else:
-        print("⛔ Skipped: Not relevant.")
-        return None
+        if is_relevant(latest):
+            save_last_guid(feed_url, latest.id)
+
+            title = translate_if_needed(latest.title)
+            summary = translate_if_needed(latest.summary)
+
+            return {
+                "title": title,
+                "link": latest.link,
+                "summary": summary,
+                "published": latest.published,
+                "image": extract_image(latest)
+            }
+
+        else:
+            print("⛔ Skipped: Not relevant.")
+    return None
