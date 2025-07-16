@@ -2,12 +2,20 @@ import asyncio
 import re
 import html
 import os
-from telegram import Bot
+import logging
+from telegram import Bot, InputMediaPhoto
 from bot.config import BOT_TOKEN, CHANNEL_ID
 from bot.fetcher import fetch_latest_post
 from bot.anilist import get_anime_info
 from bot.utils import download_trailer_youtube
-from bs4 import BeautifulSoup  # For better HTML cleaning
+from bs4 import BeautifulSoup
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 bot = Bot(token=BOT_TOKEN)
 
@@ -38,7 +46,7 @@ async def post_news():
     """Fetch and post news (text, photo, or trailer)."""
     news = fetch_latest_post()
     if not news:
-        print("No new news.")
+        logger.info("No new news found.")
         return
 
     # Combine title and content for better relevance checking
@@ -64,7 +72,7 @@ async def post_news():
 
     # Detect trailer-related posts
     if is_trailer_related(combined):
-        print("🎬 Detected trailer-related news. Fetching from AniList...")
+        logger.info("🎬 Detected trailer-related news. Fetching from AniList...")
         anime_info = get_anime_info(news['title'])
 
         if anime_info and anime_info['trailer']:
@@ -81,6 +89,7 @@ async def post_news():
                     caption += f"🏢 Studio: {anime_info['studio']}\n"
 
                 try:
+                    # Send trailer video
                     await bot.send_video(
                         chat_id=CHANNEL_ID,
                         video=open(filename, "rb"),
@@ -88,52 +97,82 @@ async def post_news():
                         parse_mode="HTML",
                         supports_streaming=True
                     )
-                    print("✅ Trailer posted as video!")
+                    logger.info("✅ Trailer posted as video!")
                     
-                    # Now post the news details separately
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=message,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
+                    # Now post the news details with image
+                    await send_news_with_image(news, message)
                 except Exception as e:
-                    print(f"❌ Telegram send error: {e}")
+                    logger.error(f"❌ Telegram send error: {e}")
                 finally:
                     if os.path.exists(filename):
                         os.remove(filename)
                 return
 
-    # If not trailer or video failed, send news with image
+    # For regular news posts
+    await send_news_with_image(news, message)
+
+async def send_news_with_image(news, message):
+    """Send news with image if available, otherwise send as text."""
     try:
-        if news.get("image"):
-            await bot.send_photo(
-                chat_id=CHANNEL_ID,
-                photo=news["image"],
-                caption=message,
-                parse_mode="HTML",
-                disable_notification=False
-            )
-        else:
-            await bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=message,
-                parse_mode="HTML",
-                disable_web_page_preview=True  # No link previews
-            )
-        print("✅ News posted.")
+        image_url = news.get("image")
+        
+        if image_url:
+            logger.info(f"🖼️ Found image: {image_url}")
+            try:
+                # Try to send as photo first
+                await bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=image_url,
+                    caption=message,
+                    parse_mode="HTML",
+                    disable_notification=False
+                )
+                logger.info("✅ News posted with image.")
+                return
+            except Exception as e:
+                logger.warning(f"⚠️ Photo send failed: {e}. Trying as media group...")
+                
+                # If photo fails, try sending as media group
+                try:
+                    await bot.send_media_group(
+                        chat_id=CHANNEL_ID,
+                        media=[
+                            InputMediaPhoto(image_url),
+                            InputMediaPhoto(
+                                media=image_url,
+                                caption=message,
+                                parse_mode="HTML"
+                            )
+                        ]
+                    )
+                    logger.info("✅ News posted via media group.")
+                    return
+                except Exception as e:
+                    logger.error(f"⚠️ Media group failed: {e}")
+        
+        # If all image methods fail or no image, send as text
+        logger.info("ℹ️ No image available, sending as text")
+        await bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=message,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        logger.info("✅ News posted as text.")
+        
     except Exception as e:
-        print(f"❌ Telegram send error: {e}")
+        logger.error(f"❌ Telegram send error: {e}")
 
 async def main_loop():
     """Run the bot loop every 10 minutes."""
     while True:
         try:
+            logger.info("🔍 Checking for new news...")
             await post_news()
         except Exception as e:
-            print(f"⚠️ Error in loop: {e}")
+            logger.error(f"⚠️ Error in main loop: {e}")
         # Check every 10 minutes (600 seconds)
-        await asyncio.sleep(10)
+        await asyncio.sleep(600)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
