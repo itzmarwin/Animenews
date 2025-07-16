@@ -94,7 +94,7 @@ async def main_loop():
             await post_news()
         except Exception as e:
             print(f"⚠️ Error in loop: {e}")
-        await asyncio.sleep(600)
+        await asyncio.sleep(60)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
