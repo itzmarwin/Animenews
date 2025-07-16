@@ -3,6 +3,8 @@ import re
 import html
 import os
 import logging
+import tempfile
+import requests
 from telegram import Bot, InputMediaPhoto
 from bot.config import BOT_TOKEN, CHANNEL_ID
 from bot.fetcher import fetch_latest_post
@@ -75,7 +77,7 @@ async def post_news():
         logger.info("🎬 Detected trailer-related news. Fetching from AniList...")
         anime_info = get_anime_info(news['title'])
 
-        if anime_info and anime_info['trailer']:
+        if anime_info and anime_info.get('trailer'):
             trailer_url = anime_info['trailer']
             filename = download_trailer_youtube(trailer_url)
 
@@ -107,9 +109,30 @@ async def post_news():
                     if os.path.exists(filename):
                         os.remove(filename)
                 return
-
+        else:
+            logger.info("ℹ️ No AniList trailer found, posting as regular news")
+    
     # For regular news posts
     await send_news_with_image(news, message)
+
+async def download_image(image_url: str):
+    """Download image from URL and return temporary file path"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+        response = requests.get(image_url, headers=headers, timeout=15, stream=True)
+        response.raise_for_status()
+        
+        # Create temporary file
+        file_ext = os.path.splitext(image_url)[1][:4] or '.jpg'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+            return f.name
+    except Exception as e:
+        logger.error(f"❌ Image download failed: {e}")
+        return None
 
 async def send_news_with_image(news, message):
     """Send news with image if available, otherwise send as text."""
@@ -118,8 +141,9 @@ async def send_news_with_image(news, message):
         
         if image_url:
             logger.info(f"🖼️ Found image: {image_url}")
+            
+            # First try: Send using URL
             try:
-                # Try to send as photo first
                 await bot.send_photo(
                     chat_id=CHANNEL_ID,
                     photo=image_url,
@@ -127,28 +151,27 @@ async def send_news_with_image(news, message):
                     parse_mode="HTML",
                     disable_notification=False
                 )
-                logger.info("✅ News posted with image.")
+                logger.info("✅ News posted with image (URL).")
                 return
             except Exception as e:
-                logger.warning(f"⚠️ Photo send failed: {e}. Trying as media group...")
+                logger.warning(f"⚠️ Photo send by URL failed: {e}. Trying download method...")
                 
-                # If photo fails, try sending as media group
-                try:
-                    await bot.send_media_group(
-                        chat_id=CHANNEL_ID,
-                        media=[
-                            InputMediaPhoto(image_url),
-                            InputMediaPhoto(
-                                media=image_url,
-                                caption=message,
-                                parse_mode="HTML"
-                            )
-                        ]
-                    )
-                    logger.info("✅ News posted via media group.")
+            # Second try: Download and send as file
+            try:
+                image_path = await download_image(image_url)
+                if image_path:
+                    with open(image_path, 'rb') as photo_file:
+                        await bot.send_photo(
+                            chat_id=CHANNEL_ID,
+                            photo=photo_file,
+                            caption=message,
+                            parse_mode="HTML"
+                        )
+                    logger.info("✅ News posted with image (downloaded).")
+                    os.remove(image_path)
                     return
-                except Exception as e:
-                    logger.error(f"⚠️ Media group failed: {e}")
+            except Exception as e:
+                logger.error(f"⚠️ Downloaded image send failed: {e}")
         
         # If all image methods fail or no image, send as text
         logger.info("ℹ️ No image available, sending as text")
@@ -172,7 +195,7 @@ async def main_loop():
         except Exception as e:
             logger.error(f"⚠️ Error in main loop: {e}")
         # Check every 10 minutes (600 seconds)
-        await asyncio.sleep(20)
+        await asyncio.sleep(600)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
