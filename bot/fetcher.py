@@ -2,12 +2,17 @@ import os
 import feedparser
 from .config import RSS_FEED_URL, LAST_GUID_FILE
 
-# Keywords to detect important anime news
+# Include only relevant anime keywords
 RELEVANT_KEYWORDS = [
     "anime adaptation", "anime announced", "anime project", "tv anime", "new anime",
     "trailer", "teaser", "key visual", "promo video", "pv", "mv",
     "delayed", "delay", "anime film", "movie", "postponed", "on break", "hiatus",
     "release date", "airing", "premiere", "starts airing", "final season", "season 2", "season 3"
+]
+
+# Words to skip if they appear in title/summary
+EXCLUDE_KEYWORDS = [
+    "zelda", "live-action", "netflix film", "game franchise", "hollywood", "actor", "casts"
 ]
 
 def get_last_guid():
@@ -24,10 +29,20 @@ def is_relevant(entry):
     """Check if the RSS entry is anime-news relevant."""
     title = entry.get("title", "").lower()
     summary = entry.get("summary", "").lower()
+    content = title + " " + summary
+
+    # Debug: print title being checked
+    print(f"🔍 Checking: {title}")
+
+    for word in EXCLUDE_KEYWORDS:
+        if word in content:
+            print(f"⛔ Skipped (excluded word): {word}")
+            return False
 
     for keyword in RELEVANT_KEYWORDS:
-        if keyword in title or keyword in summary:
+        if keyword in content:
             return True
+
     return False
 
 def extract_image(entry):
@@ -47,7 +62,6 @@ def fetch_latest_post():
     latest_entry = feed.entries[0]
     last_guid = get_last_guid()
 
-    # Already posted?
     if latest_entry.id == last_guid:
         print("🔁 No new post (GUID match).")
         return None
