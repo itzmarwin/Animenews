@@ -133,7 +133,7 @@ async def main_loop():
         except Exception as e:
             print(f"⚠️ Error in loop: {e}")
         # Check every 10 minutes (600 seconds)
-        await asyncio.sleep(600)
+        await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
