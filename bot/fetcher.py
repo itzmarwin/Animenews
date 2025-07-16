@@ -1,6 +1,6 @@
 import os
 import feedparser
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 from .config import RSS_FEEDS, LAST_GUID_DIR
 
 # Only allow anime-related content
