@@ -9,7 +9,7 @@ from .config import RSS_FEEDS, LAST_GUID_DIR
 
 # Anime-relevant keywords
 RELEVANT_KEYWORDS = [
-    "anime adaptation", "voice", "anime announced", "anime project", "tv anime", "new anime",
+    "anime adaptation", "anime", "voice", "anime announced", "anime project", "tv anime", "new anime",
     "trailer", "teaser", "key visual", "promo video", "pv", "mv",
     "delayed", "delay", "anime film", "movie", "postponed", "on break", "hiatus",
     "release date", "airing", "premiere", "starts airing", "final season", "season 2", "season 3",
