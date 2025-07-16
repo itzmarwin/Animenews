@@ -38,6 +38,35 @@ def clean_summary(raw_html):
     
     return str(soup)
 
+def clean_crunchyroll_content(raw_html):
+    """Special cleaning for Crunchyroll content that preserves paragraphs"""
+    soup = BeautifulSoup(raw_html, 'html.parser')
+    
+    # Remove unwanted elements
+    for element in soup.find_all(['script', 'style', 'iframe']):
+        element.decompose()
+    
+    # Convert headings to bold
+    for h in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+        h.name = 'strong'
+    
+    # Preserve paragraphs and line breaks
+    for p in soup.find_all('p'):
+        p.insert_after(soup.new_tag('br'))
+        p.insert_after(soup.new_tag('br'))
+    
+    # Remove all links but keep their text
+    for a in soup.find_all('a'):
+        a.replace_with(a.get_text())
+    
+    # Remove any remaining HTML tags except formatting
+    allowed_tags = ["b", "strong", "i", "u", "em", "br"]
+    for tag in soup.find_all(True):
+        if tag.name not in allowed_tags:
+            tag.unwrap()
+    
+    return str(soup)
+
 def is_trailer_related(text: str) -> bool:
     """Detect trailer or teaser announcements with more keywords."""
     text = text.lower()
@@ -51,7 +80,30 @@ async def post_news():
         logger.info("No new news found.")
         return
 
-    # Combine title and content for better relevance checking
+    # Special handling for Crunchyroll news
+    if "crunchyrollsvc.com" in news.get("link", "") or "crunchyroll.com" in news.get("link", ""):
+        logger.info("🎬 Processing Crunchyroll news")
+        # Prepare Crunchyroll-specific message
+        title = html.escape(news['title'])
+        content = news.get('raw_content', news['summary'])
+        
+        # Clean but preserve paragraphs
+        summary = clean_crunchyroll_content(content)
+        
+        # Remove any remaining URLs
+        summary = re.sub(r'https?://\S+', '', summary)
+        
+        # Don't truncate Crunchyroll content
+        message = f"📰 <b>CRUNCHYROLL: {title}</b>\n\n"
+        message += f"{html.unescape(summary)}\n\n"
+        message += f"<i>Published: {news['published']}</i>"
+        
+        # Always try to include image
+        await send_news_with_image(news, message)
+        return
+    
+    # For other news sources
+    # Combine title and content for relevance checking
     combined = f"{news['title']} {news.get('raw_content', news['summary'])}".lower()
 
     # Prepare message content
@@ -139,6 +191,14 @@ async def send_news_with_image(news, message):
     try:
         image_url = news.get("image")
         
+        # Special handling for Crunchyroll image URLs
+        if image_url and ("crunchyrollsvc.com" in image_url or "crunchyroll.com" in image_url):
+            # Crunchyroll images need parameter modification for better quality
+            if 'width=' in image_url:
+                image_url = re.sub(r'width=\d+', 'width=800', image_url)
+            if 'height=' in image_url:
+                image_url = re.sub(r'height=\d+', 'height=600', image_url)
+        
         if image_url:
             logger.info(f"🖼️ Found image: {image_url}")
             
@@ -195,7 +255,7 @@ async def main_loop():
         except Exception as e:
             logger.error(f"⚠️ Error in main loop: {e}")
         # Check every 10 minutes (600 seconds)
-        await asyncio.sleep(10)
+        await asyncio.sleep(600)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
