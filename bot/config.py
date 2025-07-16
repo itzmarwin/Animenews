@@ -9,7 +9,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")  # Example: "@yourchannelname"
 # Multiple RSS sources
 RSS_FEEDS = [
     "https://www.animenewsnetwork.com/all/rss.xml",
-    "https://feeds.feedburner.com/crunchyroll/rss/anime",  # Correct Crunchyroll feed
+    "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss",  # Correct Crunchyroll feed
     "https://myanimelist.net/rss/news.xml",
     "https://animecorner.me/feed/"
 ]
