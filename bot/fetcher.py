@@ -2,6 +2,7 @@ import os
 import re
 import feedparser
 import requests
+import time
 from deep_translator import GoogleTranslator
 from bs4 import BeautifulSoup
 from .config import RSS_FEEDS, LAST_GUID_DIR
@@ -24,13 +25,14 @@ EXCLUDE_KEYWORDS = [
 ]
 
 def guid_path(feed_url: str) -> str:
-    filename = feed_url.replace("https://", "").replace("/", "_") + ".txt"
+    """Generate safe filename for GUID storage"""
+    filename = re.sub(r'[^a-zA-Z0-9]', '_', feed_url) + ".txt"
     return os.path.join(LAST_GUID_DIR, filename)
 
 def get_last_guid(feed_url: str) -> str:
     path = guid_path(feed_url)
     if not os.path.exists(path):
-        return None
+        return ""
     with open(path, "r") as f:
         return f.read().strip()
 
@@ -82,7 +84,7 @@ def extract_image(entry) -> str:
         print("ℹ️ Found WordPress featured image")
         return entry.wp_featured_image
     
-    # Method 4: Content parsing (for feeds like Anime Corner)
+    # Method 4: Content parsing
     if "content" in entry:
         for content in entry.content:
             soup = BeautifulSoup(content.value, 'html.parser')
@@ -91,10 +93,10 @@ def extract_image(entry) -> str:
                 src = img['src']
                 # Fix relative URLs
                 if src.startswith('//'):
-                    return f"https:{src}"
+                    src = f"https:{src}"
                 elif src.startswith('/'):
                     base_url = '/'.join(entry.link.split('/')[:3])
-                    return f"{base_url}{src}"
+                    src = f"{base_url}{src}"
                 print("ℹ️ Found image via content parsing")
                 return src
     
@@ -113,24 +115,18 @@ def extract_image(entry) -> str:
             print("ℹ️ Found image via summary parsing")
             return src
     
-    # Method 6: Open Graph scraping with enhanced handling
+    # Method 6: Open Graph scraping
     if "link" in entry:
         try:
             print(f"🔍 Scraping OG image from: {entry.link}")
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': 'https://www.google.com/',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
             }
             response = requests.get(entry.link, headers=headers, timeout=15)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Try Open Graph image first
+                # Try Open Graph image
                 og_image = soup.find('meta', property='og:image')
                 if og_image and og_image.get('content'):
                     src = og_image['content']
@@ -142,13 +138,6 @@ def extract_image(entry) -> str:
                 if twitter_image and twitter_image.get('content'):
                     src = twitter_image['content']
                     print("ℹ️ Found image via Twitter card")
-                    return src
-                
-                # Try schema.org image
-                schema_image = soup.find('meta', itemprop='image')
-                if schema_image and schema_image.get('content'):
-                    src = schema_image['content']
-                    print("ℹ️ Found image via schema.org")
                     return src
                 
                 # Fallback to first large content image
@@ -163,38 +152,15 @@ def extract_image(entry) -> str:
                             src = f"{base_url}{src}"
                         
                         # Check for large images
-                        if any(x in src.lower() for x in ['featured', 'cover', 'main', 'hero', 'header', 'post']):
-                            print("ℹ️ Found image via content image (featured)")
+                        if any(x in src for x in ['wp-content', 'uploads', 'media']):
+                            print("ℹ️ Found image via content image")
                             return src
-                        
-                        # Check for image size hints in attributes
-                        width = img.get('width', '0')
-                        height = img.get('height', '0')
-                        try:
-                            if int(width) > 300 and int(height) > 200:
-                                print("ℹ️ Found image via content image (size)")
-                                return src
-                        except:
-                            pass
-                
-                # Final fallback: First image in content
-                img = soup.find('img')
-                if img and img.get('src'):
-                    src = img['src']
-                    # Fix relative URLs
-                    if src.startswith('//'):
-                        return f"https:{src}"
-                    elif src.startswith('/'):
-                        base_url = '/'.join(entry.link.split('/')[:3])
-                        return f"{base_url}{src}"
-                    print("ℹ️ Found image via first content image")
-                    return src
         except Exception as e:
             print(f"⚠️ OG image scraping failed: {e}")
     
     print("ℹ️ No image found for entry")
     return None
-    
+
 def translate_if_needed(text: str) -> str:
     try:
         # Only translate if not English
@@ -207,32 +173,43 @@ def translate_if_needed(text: str) -> str:
         return text
 
 def fetch_latest_post():
+    """Fetch the latest relevant post from any feed"""
     for feed_url in RSS_FEEDS:
         print(f"🌐 Checking feed: {feed_url}")
         try:
-            feed = feedparser.parse(feed_url)
+            # Add cache busting to prevent 304 responses
+            modified_url = f"{feed_url}?t={int(time.time())}"
+            feed = feedparser.parse(modified_url)
+            
             if not feed.entries:
                 print("❌ No entries found in feed.")
                 continue
 
             last_guid = get_last_guid(feed_url)
-            new_entries_found = False
+            print(f"ℹ️ Last GUID: {last_guid[:20]}...")
 
-            for entry in feed.entries:
-                if last_guid and entry.id == last_guid:
-                    print("🔁 Reached last processed GUID")
-                    break
+            # Process entries from oldest to newest to avoid missing updates
+            for entry in reversed(feed.entries):
+                entry_guid = entry.get('id', entry.get('link', ''))
+                
+                if not entry_guid:
+                    print("⚠️ Entry has no GUID, skipping")
+                    continue
                     
-                new_entries_found = True
+                if entry_guid == last_guid:
+                    print("🔁 Already processed this GUID")
+                    continue
+                    
                 print(f"🔍 Processing new entry: {entry.get('title', 'Untitled')[:50]}...")
                 
                 if is_relevant(entry):
-                    save_last_guid(feed_url, entry.id)
+                    print("✅ Found relevant entry")
+                    save_last_guid(feed_url, entry_guid)
                     
                     title = translate_if_needed(entry.title)
                     summary = translate_if_needed(entry.get('summary', ''))
                     
-                    # Extract raw content for better processing
+                    # Extract raw content
                     raw_content = ""
                     if "content" in entry:
                         for content in entry.content:
@@ -247,11 +224,10 @@ def fetch_latest_post():
                         "raw_content": raw_content
                     }
                 else:
-                    # Save GUID even if not relevant to prevent reprocessing
-                    save_last_guid(feed_url, entry.id)
+                    print("⛔ Not relevant, skipping")
+                    save_last_guid(feed_url, entry_guid)
                     
-            if not new_entries_found:
-                print("🔁 No new entries in feed")
+            print("ℹ️ No new relevant entries in this feed")
                     
         except Exception as e:
             print(f"⚠️ Error processing feed {feed_url}: {e}")
