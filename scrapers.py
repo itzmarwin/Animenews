@@ -45,56 +45,48 @@ def extract_content(element):
         'youtube': youtube_links
     }
 
+# Updated Crunchyroll scraper
 def scrape_crunchyroll():
     url = 'https://www.crunchyroll.com/news'
     try:
         response = requests.get(url, headers=HEADERS)
         logger.info(f"Crunchyroll status: {response.status_code}")
-        
-        # Check for blocking
-        if response.status_code != 200:
-            logger.error(f"Crunchyroll blocked with status {response.status_code}")
-            return []
-        
         soup = BeautifulSoup(response.content, 'html.parser')
         articles = []
         
-        # Updated selector for Crunchyroll
-        for item in soup.select('div.article-card'):
-            title_elem = item.select_one('h3.title')
+        # New selector - get all news cards
+        for item in soup.select('a.erc-browse-card'):
+            title_elem = item.select_one('h3.erc-browse-card__title')
             if not title_elem:
                 continue
                 
             title = title_elem.text.strip()
-            link_elem = item.select_one('a')
-            if not link_elem:
-                continue
-                
-            link = link_elem['href']
+            link = item['href']
             if not link.startswith('http'):
                 link = f'https://www.crunchyroll.com{link}'
+                
+            # Skip non-article links
+            if "/news/" not in link:
+                continue
                 
             # Get full article content
             try:
                 article_response = requests.get(link, headers=HEADERS)
                 article_soup = BeautifulSoup(article_response.content, 'html.parser')
                 
-                # Find content area - try multiple selectors
-                content_div = article_soup.select_one('div.content') or \
-                              article_soup.select_one('div.article-body') or \
-                              article_soup.select_one('div.article-content')
-                
+                # New content selectors
+                content_div = article_soup.select_one('div.article-body')
+                if not content_div:
+                    content_div = article_soup.select_one('div.content')
+                    
                 if not content_div:
                     logger.warning(f"No content found for {link}")
                     continue
                     
                 content_data = extract_content(content_div)
                 
-                # Crunchyroll specific: get main image
-                main_image = article_soup.select_one('img.article-hero__image') or \
-                             article_soup.select_one('div.article-hero img') or \
-                             article_soup.select_one('div.article-header img')
-                
+                # Get main image
+                main_image = article_soup.select_one('div.article-hero img')
                 if main_image and main_image.get('src'):
                     img_src = main_image['src']
                     if img_src.startswith('//'):
@@ -115,28 +107,24 @@ def scrape_crunchyroll():
                 continue
             
         return articles
+    # ... error handling ...
     
     except Exception as e:
         logger.error(f"Crunchyroll scraping error: {str(e)}")
         return []
 
+# Updated MyAnimeList scraper
 def scrape_myanimelist():
     url = 'https://myanimelist.net/news'
     try:
         response = requests.get(url, headers=HEADERS)
         logger.info(f"MyAnimeList status: {response.status_code}")
-        
-        # Check for blocking
-        if response.status_code != 200:
-            logger.error(f"MyAnimeList blocked with status {response.status_code}")
-            return []
-        
         soup = BeautifulSoup(response.content, 'html.parser')
         articles = []
         
-        # Updated selector for MyAnimeList
-        for item in soup.select('div.news-unit'):
-            title_elem = item.select_one('a.title')
+        # New selector - get all news units
+        for item in soup.select('div.news-unit.clearfix'):
+            title_elem = item.select_one('p.title a')
             if not title_elem:
                 continue
                 
@@ -150,22 +138,16 @@ def scrape_myanimelist():
                 article_response = requests.get(link, headers=HEADERS)
                 article_soup = BeautifulSoup(article_response.content, 'html.parser')
                 
-                # Find content area - try multiple selectors
-                content_div = article_soup.select_one('div.news-content') or \
-                             article_soup.select_one('div#content') or \
-                             article_soup.select_one('div.content')
-                
+                # New content selector
+                content_div = article_soup.select_one('div.news-content')
                 if not content_div:
                     logger.warning(f"No content found for {link}")
                     continue
                     
                 content_data = extract_content(content_div)
                 
-                # MAL specific: get main image
-                main_image = article_soup.select_one('img.news-unit-image') or \
-                            article_soup.select_one('div.news-unit-image img') or \
-                            article_soup.select_one('div.news-header img')
-                
+                # Get main image
+                main_image = item.select_one('div.thumb a img')
                 if main_image:
                     img_src = main_image.get('data-src') or main_image.get('src')
                     if img_src:
@@ -187,6 +169,7 @@ def scrape_myanimelist():
                 continue
             
         return articles
+    # ... error handling ...
     
     except Exception as e:
         logger.error(f"MyAnimeList scraping error: {str(e)}")
