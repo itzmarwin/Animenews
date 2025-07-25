@@ -56,11 +56,11 @@ def scrape_anime_corner():
         
         articles = []
         
-        # Find news items
-        for item in soup.select('article'):
+        # Find news items - updated selector
+        for item in soup.select('article.type-post'):
             try:
                 # Extract title
-                title_elem = item.select_one('h3.entry-title a')
+                title_elem = item.select_one('h2.entry-title a') or item.select_one('h3.entry-title a')
                 if not title_elem:
                     continue
                 title = title_elem.text.strip()
@@ -71,24 +71,24 @@ def scrape_anime_corner():
                 # Extract image
                 img = item.select_one('img')
                 image_url = img['src'] if img and 'src' in img.attrs else None
+                if image_url and image_url.startswith('/'):
+                    image_url = 'https://animecorner.me' + image_url
                 
                 # Get article content
+                logger.info(f"Fetching article: {link}")
                 article_res = requests.get(link, headers=headers, timeout=REQUEST_TIMEOUT)
                 article_soup = BeautifulSoup(article_res.text, "html.parser")
                 
-                # Extract content
-                content_div = article_soup.select_one('div.entry-content')
+                # Extract content - updated selector
+                content_div = article_soup.select_one('div.entry-content') or article_soup.select_one('div.post-content')
                 if content_div:
                     content_data = extract_content(content_div)
                 else:
                     content_data = {'text': '', 'images': [], 'videos': [], 'youtube': []}
                 
-                # Get main image from article
-                main_image = article_soup.select_one('div.entry-content img')
-                if main_image:
-                    img_src = main_image.get('src') or main_image.get('data-src')
-                    if img_src and img_src not in content_data['images']:
-                        content_data['images'].insert(0, img_src)
+                # Add main image if exists
+                if image_url and image_url not in content_data['images']:
+                    content_data['images'].insert(0, image_url)
                 
                 articles.append({
                     "title": title,
@@ -119,11 +119,11 @@ def scrape_ann():
         
         articles = []
         
-        # Find news items
-        for item in soup.select('.herald-box.news'):
+        # Find news items - updated selector
+        for item in soup.select('div.herald-box.news, div.herald-box.news-feature'):
             try:
                 # Extract title
-                title_elem = item.select_one('h3 a')
+                title_elem = item.select_one('h2 a') or item.select_one('h3 a')
                 if not title_elem:
                     continue
                 title = title_elem.text.strip()
@@ -136,24 +136,24 @@ def scrape_ann():
                 # Extract image
                 img = item.select_one('img')
                 image_url = img['src'] if img and 'src' in img.attrs else None
+                if image_url and image_url.startswith('/'):
+                    image_url = 'https://www.animenewsnetwork.com' + image_url
                 
                 # Get article content
+                logger.info(f"Fetching article: {link}")
                 article_res = requests.get(link, headers=headers, timeout=REQUEST_TIMEOUT)
                 article_soup = BeautifulSoup(article_res.text, "html.parser")
                 
-                # Extract content
-                content_div = article_soup.select_one('div#content-main')
+                # Extract content - updated selector
+                content_div = article_soup.select_one('div#content-main') or article_soup.select_one('div.main-content')
                 if content_div:
                     content_data = extract_content(content_div)
                 else:
                     content_data = {'text': '', 'images': [], 'videos': [], 'youtube': []}
                 
-                # Get main image from article
-                main_image = article_soup.select_one('div#content-main img')
-                if main_image:
-                    img_src = main_image.get('src') or main_image.get('data-src')
-                    if img_src and img_src not in content_data['images']:
-                        content_data['images'].insert(0, img_src)
+                # Add main image if exists
+                if image_url and image_url not in content_data['images']:
+                    content_data['images'].insert(0, image_url)
                 
                 articles.append({
                     "title": title,
