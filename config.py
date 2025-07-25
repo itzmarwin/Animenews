@@ -36,5 +36,19 @@ STORAGE_FILE = 'posted.json'
 # Request timeout (in seconds)
 REQUEST_TIMEOUT = 15
 
-# Selenium configuration
-SELENIUM_HEADLESS = True  # Set to False for debugging
+# Websites to scrape
+SOURCES = [
+    {
+        'name': 'Anime Corner',
+        'url': 'https://animecorner.me/category/news/anime-news/',
+        'scraper': 'scrape_anime_corner'
+    },
+    {
+        'name': 'Anime News Network',
+        'url': 'https://www.animenewsnetwork.com/',
+        'scraper': 'scrape_ann'
+    }
+]
+
+# Time between checks (5 minutes)
+CHECK_INTERVAL = 5
