@@ -10,10 +10,7 @@ if not TOKEN:
 
 CHANNEL_ID = '-1002332375459'  # Your channel ID
 
-# Proxy configuration - set to None to disable
-PROXIES = None
-
-# Enhanced Scraping configuration
+# Scraping configuration
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
@@ -29,7 +26,7 @@ def get_random_headers():
         'Accept-Language': 'en-US,en;q=0.5',
         'Connection': 'keep-alive',
         'Referer': 'https://www.google.com/',
-        'DNT': '1',  # Do Not Track
+        'DNT': '1',
         'Upgrade-Insecure-Requests': '1'
     }
 
@@ -39,5 +36,5 @@ STORAGE_FILE = 'posted.json'
 # Request timeout (in seconds)
 REQUEST_TIMEOUT = 15
 
-# Debug mode
-DEBUG_MODE = True
+# Selenium configuration
+SELENIUM_HEADLESS = True  # Set to False for debugging
