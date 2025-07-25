@@ -60,12 +60,14 @@ def scrape_crunchyroll():
         
         # Configure Chrome options
         chrome_options = Options()
+        chrome_options.binary_location = "/usr/bin/google-chrome"
         if SELENIUM_HEADLESS:
             chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+        chrome_options.add_argument("--window-size=1920,1080")
         
         # Initialize WebDriver
         driver = webdriver.Chrome(
@@ -77,9 +79,14 @@ def scrape_crunchyroll():
             logger.info(f"Loading Crunchyroll news page: {url}")
             driver.get(url)
             
-            # Wait for articles to load
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "a.news-card__link, a.erc-browse-card"))
+            # Wait for the page to load completely
+            WebDriverWait(driver, 30).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # Wait for any article container to appear (more generic)
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/news/']"))
             )
             
             # Scroll to load all content
@@ -87,59 +94,72 @@ def scrape_crunchyroll():
             last_height = driver.execute_script("return document.body.scrollHeight")
             while True:
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)  # Wait to load
+                time.sleep(3)  # Wait longer to load
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     break
                 last_height = new_height
             
-            # Get page source and parse
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            articles = soup.select("a.news-card__link, a.erc-browse-card")
-            logger.info(f"Found {len(articles)} Crunchyroll articles on page")
+            # Get all news links
+            news_links = []
+            for link in driver.find_elements(By.CSS_SELECTOR, "a[href*='/news/']"):
+                href = link.get_attribute("href")
+                if href and href not in news_links:
+                    news_links.append(href)
+            
+            logger.info(f"Found {len(news_links)} Crunchyroll news links")
             
             news = []
-            for a in articles[:10]:  # Process first 10 articles
+            for link in news_links[:10]:  # Process first 10 articles
                 try:
-                    # Extract title
-                    title_tag = a.select_one(".news-card__title, .erc-browse-card__title")
-                    title = title_tag.text.strip() if title_tag else "No title"
-                    
-                    # Get article link
-                    link = a["href"]
-                    if not link.startswith('http'):
-                        link = f'https://www.crunchyroll.com{link}'
-                    
-                    # Skip non-news links
-                    if "/news/" not in link:
-                        continue
-                    
-                    # Visit article page using Selenium
+                    # Visit article page
                     logger.info(f"Fetching article: {link}")
                     driver.get(link)
                     
                     # Wait for article content to load
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.article-body, div.content"))
+                    WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "h1, h2, h3, div.article-body, div.content"))
                     )
                     
-                    # Parse article page
-                    article_soup = BeautifulSoup(driver.page_source, "html.parser")
+                    # Get page source
+                    article_html = driver.page_source
+                    article_soup = BeautifulSoup(article_html, "html.parser")
+                    
+                    # Extract title - try multiple selectors
+                    title = "No title"
+                    for selector in ["h1", "h2", "h3"]:
+                        title_elem = article_soup.select_one(selector)
+                        if title_elem:
+                            title = title_elem.text.strip()
+                            break
                     
                     # Extract images
                     images = []
+                    # Method 1: Open Graph image
                     og_image = article_soup.find("meta", property="og:image")
                     if og_image and og_image.get("content"):
                         images.append(og_image["content"])
                     
+                    # Method 2: Any image in content
+                    for img in article_soup.select("img"):
+                        src = img.get("src") or img.get("data-src")
+                        if src and "crunchyroll" in src and not src.startswith("data:image"):
+                            if src.startswith("//"):
+                                src = "https:" + src
+                            images.append(src)
+                    
                     # Extract content text
+                    content = ""
                     content_div = article_soup.select_one("div.article-body, div.content")
-                    content = content_div.get_text(strip=True, separator='\n') if content_div else ""
+                    if content_div:
+                        # Remove unwanted elements
+                        for element in content_div.select("script, style, iframe"):
+                            element.decompose()
+                        content = content_div.get_text(strip=True, separator='\n')
                     
                     # Extract YouTube videos
                     youtube_links = []
-                    iframes = article_soup.find_all("iframe")
-                    for iframe in iframes:
+                    for iframe in article_soup.select("iframe"):
                         src = iframe.get("src", "")
                         if 'youtube.com' in src or 'youtu.be' in src:
                             if src.startswith('//'):
