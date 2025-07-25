@@ -54,7 +54,7 @@ def scrape_crunchyroll():
         soup = BeautifulSoup(response.content, 'html.parser')
         articles = []
         
-        # New selector - get all news cards
+        # New selector for Crunchyroll's updated layout
         for item in soup.select('a.erc-browse-card'):
             title_elem = item.select_one('h3.erc-browse-card__title')
             if not title_elem:
@@ -65,7 +65,7 @@ def scrape_crunchyroll():
             if not link.startswith('http'):
                 link = f'https://www.crunchyroll.com{link}'
                 
-            # Skip non-article links
+            # Filter only actual news articles
             if "/news/" not in link:
                 continue
                 
@@ -74,7 +74,7 @@ def scrape_crunchyroll():
                 article_response = requests.get(link, headers=HEADERS)
                 article_soup = BeautifulSoup(article_response.content, 'html.parser')
                 
-                # New content selectors
+                # Updated content selector
                 content_div = article_soup.select_one('div.article-body')
                 if not content_div:
                     content_div = article_soup.select_one('div.content')
@@ -85,8 +85,9 @@ def scrape_crunchyroll():
                     
                 content_data = extract_content(content_div)
                 
-                # Get main image
-                main_image = article_soup.select_one('div.article-hero img')
+                # Get main image - updated selector
+                main_image = article_soup.select_one('div.article-hero img') or \
+                            article_soup.select_one('img.article-hero__image')
                 if main_image and main_image.get('src'):
                     img_src = main_image['src']
                     if img_src.startswith('//'):
@@ -107,7 +108,6 @@ def scrape_crunchyroll():
                 continue
             
         return articles
-    # ... error handling ...
     
     except Exception as e:
         logger.error(f"Crunchyroll scraping error: {str(e)}")
@@ -122,9 +122,9 @@ def scrape_myanimelist():
         soup = BeautifulSoup(response.content, 'html.parser')
         articles = []
         
-        # New selector - get all news units
-        for item in soup.select('div.news-unit.clearfix'):
-            title_elem = item.select_one('p.title a')
+        # Updated selector to get all news items
+        for item in soup.select('div.news-unit'):
+            title_elem = item.select_one('a.title')
             if not title_elem:
                 continue
                 
@@ -138,16 +138,21 @@ def scrape_myanimelist():
                 article_response = requests.get(link, headers=HEADERS)
                 article_soup = BeautifulSoup(article_response.content, 'html.parser')
                 
-                # New content selector
+                # UPDATED CONTENT SELECTOR - now targets the actual content area
                 content_div = article_soup.select_one('div.news-content')
+                if not content_div:
+                    # Try alternative selector for different article types
+                    content_div = article_soup.select_one('div#content > div:nth-child(2) > div:last-child')
+                    
                 if not content_div:
                     logger.warning(f"No content found for {link}")
                     continue
                     
                 content_data = extract_content(content_div)
                 
-                # Get main image
-                main_image = item.select_one('div.thumb a img')
+                # Get main image - updated selector
+                main_image = item.select_one('img.news-unit-image') or \
+                            article_soup.select_one('div.news-unit-image img')
                 if main_image:
                     img_src = main_image.get('data-src') or main_image.get('src')
                     if img_src:
@@ -169,7 +174,6 @@ def scrape_myanimelist():
                 continue
             
         return articles
-    # ... error handling ...
     
     except Exception as e:
         logger.error(f"MyAnimeList scraping error: {str(e)}")
