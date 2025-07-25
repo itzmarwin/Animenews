@@ -21,8 +21,8 @@ USER_AGENTS = [
 
 # Proxy configuration (if needed)
 PROXIES = {
-    # 'http': 'http://user:pass@proxy_ip:port',
-    # 'https': 'http://user:pass@proxy_ip:port'
+     'http': 'http://user:pass@proxy_ip:port',
+     'https': 'http://user:pass@proxy_ip:port'
 }
 
 def get_random_headers():
