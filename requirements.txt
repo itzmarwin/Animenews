@@ -3,5 +3,3 @@ beautifulsoup4
 python-telegram-bot
 youtube_dl
 schedule
-selenium
-webdriver-manager
