@@ -43,7 +43,12 @@ def send_news_item(item):
         # Prepare caption
         caption = f"<b>{item['source']}</b>\n<b>{item['title']}</b>"
         if item.get('content'):
-            caption += f"\n\n{item['content'][:500]}{'...' if len(item['content']) > 500 else ''}"
+            # Truncate content to fit in Telegram caption
+            max_length = 1000 - len(caption) - 100
+            content = item['content']
+            if len(content) > max_length:
+                content = content[:max_length] + '...'
+            caption += f"\n\n{content}"
         caption += f"\n\n<a href='{item['url']}'>Read more</a>"
         
         # Handle YouTube videos
