@@ -15,22 +15,36 @@ def extract_content(element):
     
     # Process all elements
     for elem in element.find_all(recursive=True):
-        if elem.name == 'p':
+        # Handle text content
+        if elem.name in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
             text = elem.get_text(strip=True)
-            if text:  # Skip empty paragraphs
+            if text:  # Skip empty text
                 content.append(text)
+        
+        # Handle images
         elif elem.name == 'img' and elem.get('src'):
             img_src = elem['src']
             if not img_src.startswith('data:image'):  # Skip data URIs
                 if img_src.startswith('//'):
                     img_src = 'https:' + img_src
                 images.append(img_src)
+        
+        # Handle lazy-loaded images
+        elif elem.name == 'img' and elem.get('data-src'):
+            img_src = elem['data-src']
+            if img_src.startswith('//'):
+                img_src = 'https:' + img_src
+            images.append(img_src)
+        
+        # Handle videos
         elif elem.name == 'video' and elem.get('src'):
             video_src = elem['src']
             if not video_src.startswith('data:'):
                 if video_src.startswith('//'):
                     video_src = 'https:' + video_src
                 videos.append(video_src)
+        
+        # Handle YouTube embeds
         elif elem.name == 'iframe' and elem.get('src'):
             src = elem['src']
             if 'youtube.com' in src or 'youtu.be' in src:
