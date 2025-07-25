@@ -4,61 +4,35 @@ import re
 import logging
 import random
 import time
-from config import get_random_headers, PROXIES, REQUEST_TIMEOUT, DEBUG_MODE
+from config import get_random_headers, REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
-
-def make_request(url, max_retries=3):
-    """Make a request with retries and random delays"""
-    for attempt in range(max_retries):
-        try:
-            headers = get_random_headers()
-            # Use proxies only if defined in config
-            proxies = PROXIES if 'PROXIES' in globals() and PROXIES else None
-            
-            response = requests.get(
-                url, 
-                headers=headers, 
-                proxies=proxies, 
-                timeout=REQUEST_TIMEOUT
-            )
-            response.raise_for_status()
-            
-            # Check for Cloudflare challenge
-            if "cloudflare" in response.text.lower() and "challenge" in response.text.lower():
-                raise Exception("Cloudflare challenge detected")
-                
-            return response
-        except Exception as e:
-            logger.warning(f"Request failed (attempt {attempt+1}/{max_retries}): {str(e)}")
-            if attempt < max_retries - 1:
-                # Exponential backoff with jitter
-                delay = (2 ** attempt) + random.uniform(0, 1)
-                time.sleep(delay)
-    
-    raise Exception(f"Failed to fetch {url} after {max_retries} attempts")
 
 def scrape_myanimelist():
     url = "https://myanimelist.net/news"
     try:
-        logger.info("Scraping MyAnimeList...")
-        response = make_request(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+        logger.info("Scraping MyAnimeList with reliable method...")
+        headers = get_random_headers()
+        res = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        soup = BeautifulSoup(res.text, "html.parser")
         
-        # Find news items
-        articles = soup.select("div.news-unit.clearfix")
+        # Reliable selector from your working bot
+        articles = soup.select(".news-unit.clearfix")
         if not articles:
+            # Alternative selector
             articles = soup.select("div.news-unit")
             
-        logger.debug(f"Found {len(articles)} news units")
+        logger.info(f"Found {len(articles)} news units")
         
         news = []
         for a in articles:
             try:
-                # Extract title
+                # Extract title - using multiple selectors
                 title_elem = a.select_one(".title")
                 if not title_elem:
                     title_elem = a.select_one("p.title")
+                if not title_elem:
+                    title_elem = a.select_one("h2.title")
                 title = title_elem.text.strip() if title_elem else "No title"
                 
                 # Extract link
@@ -95,28 +69,30 @@ def scrape_myanimelist():
 def scrape_crunchyroll():
     url = "https://www.crunchyroll.com/news"
     try:
-        logger.info("Scraping Crunchyroll...")
-        response = make_request(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+        logger.info("Scraping Crunchyroll with reliable method...")
+        headers = get_random_headers()
+        res = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        soup = BeautifulSoup(res.text, "html.parser")
         
-        # Find news cards - using multiple selectors for reliability
+        # Reliable selector from your working bot
         articles = soup.select("a.news-card__link")
         if not articles:
+            # Alternative selectors
             articles = soup.select("a.erc-browse-card")
-        if not articles:
-            articles = soup.select("a[href*='/news/']")
-            
-        logger.debug(f"Found {len(articles)} potential articles")
+            if not articles:
+                articles = soup.select("div.article-card a")
+        
+        logger.info(f"Found {len(articles)} potential articles")
         
         news = []
-        for a in articles[:20]:  # Limit to 20 articles
+        for a in articles[:10]:  # Process first 10 articles
             try:
                 # Extract title
                 title_tag = a.select_one(".news-card__title")
                 if not title_tag:
                     title_tag = a.select_one(".erc-browse-card__title")
                 if not title_tag:
-                    title_tag = a.select_one("h3")
+                    title_tag = a.select_one("h3.title")
                 title = title_tag.text.strip() if title_tag else "No title"
                 
                 # Get article link
@@ -130,24 +106,15 @@ def scrape_crunchyroll():
                     continue
                 
                 # Visit article page to get more details
-                logger.debug(f"Fetching article: {link}")
-                article_response = make_request(link)
-                article_soup = BeautifulSoup(article_response.text, "html.parser")
+                logger.info(f"Fetching article: {link}")
+                article_res = requests.get(link, headers=headers, timeout=REQUEST_TIMEOUT)
+                article_soup = BeautifulSoup(article_res.text, "html.parser")
                 
-                # Extract images
+                # Extract images using OG tag
                 images = []
-                # Try multiple image sources
                 og_image = article_soup.find("meta", property="og:image")
                 if og_image and og_image.get("content"):
                     images.append(og_image["content"])
-                
-                # Try hero image
-                hero_image = article_soup.select_one("img.article-hero__image")
-                if hero_image and hero_image.get("src"):
-                    img_src = hero_image["src"]
-                    if img_src.startswith('//'):
-                        img_src = 'https:' + img_src
-                    images.append(img_src)
                 
                 # Extract content text
                 content_div = article_soup.select_one("div.article-body")
