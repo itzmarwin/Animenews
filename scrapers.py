@@ -45,75 +45,75 @@ def scrape_myanimelist():
         return []
 
 def scrape_crunchyroll():
+    url = 'https://www.crunchyroll.com/news'
     try:
-        logger.info("Scraping Crunchyroll via API...")
-        # API URL for Crunchyroll news
-        api_url = "https://www.crunchyroll.com/content/v2/discover/news"
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        logger.info(f"Crunchyroll status: {response.status_code}")
         
-        # API parameters to get latest news
-        params = {
-            'n': 20,  # Number of articles to fetch
-            'locale': 'en-US'
-        }
-        
-        # Make API request
-        response = requests.get(api_url, headers=HEADERS, params=params)
         if response.status_code != 200:
-            logger.error(f"Crunchyroll API returned {response.status_code}")
+            logger.error(f"Crunchyroll blocked with status {response.status_code}")
             return []
         
-        data = response.json()
+        soup = BeautifulSoup(response.content, 'html.parser')
         articles = []
         
-        for item in data.get('data', []):
+        for item in soup.select('div.article-card'):
+            title_elem = item.select_one('h3.title')
+            if not title_elem:
+                continue
+                
+            title = title_elem.text.strip()
+            link_elem = item.select_one('a')
+            if not link_elem:
+                continue
+                
+            link = link_elem['href']
+            if not link.startswith('http'):
+                link = f'https://www.crunchyroll.com{link}'
+            
             try:
-                # Get article ID and slug for URL
-                article_id = item['id']
-                slug = item.get('slug', 'news')
+                article_response = requests.get(link, headers=HEADERS, timeout=10)
+                article_soup = BeautifulSoup(article_response.content, 'html.parser')
                 
-                # Construct article URL
-                link = f"https://www.crunchyroll.com/news/{article_id}/{slug}"
+                content_div = article_soup.select_one('div.content') or \
+                              article_soup.select_one('div.article-body') or \
+                              article_soup.select_one('div.article-content')
                 
-                # Fetch article details
-                article_url = f"https://www.crunchyroll.com/content/v2/cms/articles/{article_id}?locale=en-US"
-                article_res = requests.get(article_url, headers=HEADERS)
-                article_data = article_res.json().get('data', {})
+                if not content_div:
+                    logger.warning(f"No content found for {link}")
+                    continue
                 
-                # Extract content
-                content = article_data.get('body', '')
+                # Simple text extraction
+                content = '\n\n'.join(p.get_text(strip=True) for p in content_div.find_all('p') if p.get_text(strip=True))
                 
-                # Extract images
+                # Image
                 images = []
-                for img in article_data.get('images', []):
-                    if img.get('type') == 'hero' and img.get('url'):
-                        images.append(img['url'])
+                main_img = article_soup.select_one('img.article-hero__image') or \
+                           article_soup.select_one('div.article-hero img') or \
+                           article_soup.select_one('div.article-header img')
                 
-                # Extract YouTube videos from content
-                youtube_links = []
-                if content:
-                    soup = BeautifulSoup(content, 'html.parser')
-                    for iframe in soup.find_all('iframe'):
-                        src = iframe.get('src', '')
-                        if 'youtube.com' in src or 'youtu.be' in src:
-                            if src.startswith('//'):
-                                src = 'https:' + src
-                            youtube_links.append(src)
+                if main_img and main_img.get('src'):
+                    img_src = main_img['src']
+                    if img_src.startswith('//'):
+                        img_src = 'https:' + img_src
+                    images.append(img_src)
                 
                 articles.append({
-                    "title": item.get('title', 'No Title'),
-                    "url": link,
-                    "content": content,
-                    "images": images,
-                    "videos": [],
-                    "youtube": youtube_links,
-                    "source": "Crunchyroll"
+                    'title': title,
+                    'url': link,
+                    'content': content,
+                    'images': images,
+                    'videos': [],
+                    'youtube': [],
+                    'source': 'Crunchyroll'
                 })
             except Exception as e:
-                logger.error(f"Error processing Crunchyroll article: {str(e)}")
+                logger.error(f"Error scraping Crunchyroll article: {str(e)}")
+                continue
         
         logger.info(f"Found {len(articles)} Crunchyroll articles")
         return articles
     
     except Exception as e:
-        logger.error(f"Crunchyroll API scraping error: {str(e)}")
+        logger.error(f"Crunchyroll scraping error: {str(e)}")
         return []
