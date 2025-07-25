@@ -1,6 +1,5 @@
-python-telegram-bot==20.6
-feedparser==6.0.10
-python-dotenv==1.0.1
-deep-translator==1.11.4
+python-telegram-bot==20.3
+beautifulsoup4
+requests
+schedule
 yt-dlp
-beautifulsoup4==4.12.3
