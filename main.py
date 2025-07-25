@@ -4,14 +4,14 @@ import os
 import schedule
 import logging
 from telegram import Bot, InputMediaPhoto, InputMediaVideo
-from config import TOKEN, CHANNEL_ID, STORAGE_FILE
-from scrapers import scrape_myanimelist, scrape_crunchyroll
+from config import TOKEN, CHANNEL_ID, STORAGE_FILE, SOURCES, CHECK_INTERVAL
+from scrapers import scrape_anime_corner, scrape_ann
 from media_handler import download_image, download_youtube_video
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def send_news_item(item):
             caption += f"\n\n{content}"
         caption += f"\n\n<a href='{item['url']}'>Read more</a>"
         
-        # Handle YouTube videos
+        # Handle YouTube videos first
         if item.get('youtube'):
             for yt_url in item['youtube']:
                 try:
@@ -102,7 +102,9 @@ def send_news_item(item):
                                 parse_mode="HTML"
                             ))
                         else:
-                            media_group.append(InputMediaPhoto(media=img_url))
+                            media_group.append(InputMediaPhoto(
+                                media=img_url
+                            ))
                     bot.send_media_group(
                         chat_id=CHANNEL_ID,
                         media=media_group
@@ -110,7 +112,7 @@ def send_news_item(item):
                     return True
                 except Exception as e:
                     logger.error(f"Media group error: {str(e)}")
-                    # Fallback to first image
+                    # Fallback to single image
                     if images:
                         try:
                             image_path = download_image(images[0])
@@ -125,7 +127,7 @@ def send_news_item(item):
                                 os.unlink(image_path)
                                 return True
                         except Exception as e:
-                            logger.error(f"Fallback image error: {str(e)}")
+                            logger.error(f"Fallback photo error: {str(e)}")
         
         # Text-only fallback
         bot.send_message(
@@ -142,14 +144,26 @@ def send_news_item(item):
 
 def check_and_post():
     logger.info("Checking for new articles...")
-    all_news = scrape_myanimelist() + scrape_crunchyroll()
-    new_count = 0
+    all_news = []
     
-    for news in all_news:
-        if news['url'] not in posted_links:
-            success = send_news_item(news)
-            if success:
-                posted_links.add(news['url'])
+    # Scrape all sources
+    for source in SOURCES:
+        try:
+            scraper = globals().get(source['scraper'])
+            if scraper:
+                articles = scraper()
+                logger.info(f"Found {len(articles)} articles from {source['name']}")
+                all_news.extend(articles)
+        except Exception as e:
+            logger.error(f"Error scraping {source['name']}: {str(e)}")
+    
+    # Process and send new articles
+    new_count = 0
+    for article in all_news:
+        if article['url'] not in posted_links:
+            logger.info(f"Processing new article: {article['title']}")
+            if send_news_item(article):
+                posted_links.add(article['url'])
                 new_count += 1
                 # Avoid rate limits
                 time.sleep(5)
@@ -158,13 +172,19 @@ def check_and_post():
         save_posted_links()
     logger.info(f"Posted {new_count} new articles")
 
+def safe_check_and_post():
+    try:
+        check_and_post()
+    except Exception as e:
+        logger.error(f"Error in scheduled job: {str(e)}")
+
 def main():
     logger.info("Starting Anime News Bot")
     # Run immediately on start
-    check_and_post()
+    safe_check_and_post()
     
-    # Schedule to run every 30 minutes
-    schedule.every(30).minutes.do(check_and_post)
+    # Schedule to run every 5 minutes
+    schedule.every(CHECK_INTERVAL).minutes.do(safe_check_and_post)
     
     while True:
         schedule.run_pending()
