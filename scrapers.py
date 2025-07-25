@@ -13,10 +13,13 @@ def make_request(url, max_retries=3):
     for attempt in range(max_retries):
         try:
             headers = get_random_headers()
+            # Use proxies only if defined in config
+            proxies = PROXIES if 'PROXIES' in globals() and PROXIES else None
+            
             response = requests.get(
                 url, 
                 headers=headers, 
-                proxies=PROXIES, 
+                proxies=proxies, 
                 timeout=REQUEST_TIMEOUT
             )
             response.raise_for_status()
