@@ -3,13 +3,12 @@ import tempfile
 import youtube_dl
 import os
 import logging
-from config import get_random_headers  # Updated import
+from config import get_random_headers
 
 logger = logging.getLogger(__name__)
 
 def download_image(url):
     try:
-        # Use the new headers function
         headers = get_random_headers()
         response = requests.get(url, headers=headers, stream=True)
         response.raise_for_status()
