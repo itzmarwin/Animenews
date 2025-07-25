@@ -1,78 +1,133 @@
-# bot.py
-
+import os
+import json
+import asyncio
+import aiohttp
+from bs4 import BeautifulSoup
+from pytube import YouTube
 from telegram import Bot
-import time, json, os, schedule
-from config import BOT_TOKEN, CHAT_ID
-from news_scraper import fetch_mal_news, fetch_crunchyroll_news
-from media_handler import download_image, download_youtube_video
+from dotenv import load_dotenv
 
-bot = Bot(token=BOT_TOKEN)
-STORAGE_FILE = "posted.json"
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHANNEL_ID")
+bot = Bot(token=TELEGRAM_TOKEN)
 
 # Load posted links
-if os.path.exists(STORAGE_FILE):
-    with open(STORAGE_FILE, "r") as f:
-        posted_links = set(json.load(f))
+if os.path.exists("posted.json"):
+    with open("posted.json", "r") as f:
+        posted_links = json.load(f)
 else:
-    posted_links = set()
+    posted_links = []
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
 
-def save_posted_links():
-    with open(STORAGE_FILE, "w") as f:
-        json.dump(list(posted_links), f)
+async def download_image(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                filename = "image.jpg"
+                with open(filename, "wb") as f:
+                    f.write(await resp.read())
+                return filename
+    return None
 
+async def download_youtube_video(url):
+    try:
+        yt = YouTube(url)
+        stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+        filename = "video.mp4"
+        stream.download(filename=filename)
+        return filename
+    except Exception as e:
+        print("❌ Error downloading YouTube video:", e)
+        return None
 
-def send_media_news(news_item):
-    title = news_item["title"]
-    link = news_item["link"]
-    image_url = news_item["image"]
-    video_url = news_item["video"]
-    source = news_item["source"]
-
-    caption = f"<b>{source}</b>\n<b>{title}</b>"
-
-    # 🟨 Prefer YouTube video > Image > Text
-    if video_url:
-        video_file = download_youtube_video(video_url)
-        if video_file:
-            bot.send_video(chat_id=CHAT_ID, video=open(video_file, "rb"), caption=caption, parse_mode="HTML")
-            print(f"🎞️ Posted video: {title}")
-            return True
-
-    elif image_url:
-        image_file = download_image(image_url)
+async def send_to_telegram(link, title, image_file=None, video_file=None):
+    caption = f"<b>{title}</b>\n{link}"
+    try:
         if image_file:
-            bot.send_photo(chat_id=CHAT_ID, photo=open(image_file, "rb"), caption=caption + f"\n{link}", parse_mode="HTML")
-            print(f"🖼️ Posted image: {title}")
-            return True
+            with open(image_file, "rb") as photo:
+                await bot.send_photo(chat_id=CHAT_ID, photo=photo, caption=caption, parse_mode="HTML")
+                print("🖼️ Posted image:", title)
+        elif video_file:
+            with open(video_file, "rb") as video:
+                await bot.send_video(chat_id=CHAT_ID, video=video, caption=caption, parse_mode="HTML")
+                print("📽️ Posted video:", title)
+        else:
+            await bot.send_message(chat_id=CHAT_ID, text=caption, parse_mode="HTML")
+            print("📝 Posted text:", title)
 
-    else:
-        # Fallback to text only
-        text = f"{caption}\n{link}"
-        bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="HTML")
-        print(f"📝 Posted text: {title}")
-        return True
+        posted_links.append(link)
+        with open("posted.json", "w") as f:
+            json.dump(posted_links, f, indent=2)
 
-    return False
+    except Exception as e:
+        print(f"❌ Error sending to Telegram: {e}")
 
+async def parse_crunchyroll():
+    url = "https://www.crunchyroll.com/news"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=HEADERS) as resp:
+            soup = BeautifulSoup(await resp.text(), "html.parser")
+            articles = soup.select("li.news-item a.news-link")
+            for a in articles[:3]:
+                link = "https://www.crunchyroll.com" + a["href"]
+                if link in posted_links:
+                    continue
+                title = a.select_one(".text-wrapper h3").text.strip()
+                img_tag = a.select_one("img")
+                image_url = img_tag["src"] if img_tag else None
+                image_file = await download_image(image_url) if image_url else None
 
-def check_and_post():
-    print("🔍 Checking for news updates...")
-    all_news = fetch_mal_news() + fetch_crunchyroll_news()
+                async with session.get(link, headers=HEADERS) as article_resp:
+                    article_soup = BeautifulSoup(await article_resp.text(), "html.parser")
+                    iframe = article_soup.find("iframe")
+                    video_file = None
+                    if iframe and "youtube.com" in iframe.get("src", ""):
+                        youtube_url = iframe["src"].split("?")[0]
+                        video_file = await download_youtube_video(youtube_url)
 
-    for news in all_news:
-        if news["link"] not in posted_links:
-            success = send_media_news(news)
-            if success:
-                posted_links.add(news["link"])
-                save_posted_links()
+                await send_to_telegram(link, title, image_file, video_file)
 
+async def parse_myanimelist():
+    url = "https://myanimelist.net/news"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=HEADERS) as resp:
+            soup = BeautifulSoup(await resp.text(), "html.parser")
+            items = soup.select("div.news-unit.clearfix")
+            for item in items[:3]:
+                a = item.select_one("a")
+                link = a["href"]
+                if link in posted_links:
+                    continue
+                title = a.text.strip()
+                img_tag = item.select_one("img")
+                image_url = img_tag["src"] if img_tag else None
+                image_file = await download_image(image_url) if image_url else None
 
-# ⏰ Schedule every 5 minutes
-schedule.every(5).minutes.do(check_and_post)
+                async with session.get(link, headers=HEADERS) as article_resp:
+                    article_soup = BeautifulSoup(await article_resp.text(), "html.parser")
+                    iframe = article_soup.find("iframe")
+                    video_file = None
+                    if iframe and "youtube.com" in iframe.get("src", ""):
+                        youtube_url = iframe["src"].split("?")[0]
+                        video_file = await download_youtube_video(youtube_url)
 
-print("✅ Bot started and running...")
+                await send_to_telegram(link, title, image_file, video_file)
 
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+async def check_news():
+    await parse_crunchyroll()
+    await parse_myanimelist()
+
+async def main():
+    print("✅ Bot started and running...")
+    while True:
+        print("🔍 Checking for news updates...")
+        await check_news()
+        await asyncio.sleep(300)  # 5 minutes
+
+if __name__ == "__main__":
+    asyncio.run(main())
