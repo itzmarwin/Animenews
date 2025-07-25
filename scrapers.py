@@ -4,7 +4,7 @@ import re
 import logging
 import random
 import time
-from config import get_random_headers, REQUEST_TIMEOUT, SELENIUM_HEADLESS
+from config import get_random_headers, REQUEST_TIMEOUT, SELENIUM_HEADLESS, USER_AGENTS  # Added USER_AGENTS import
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
